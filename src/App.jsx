@@ -1,55 +1,76 @@
 import React, { useState, useEffect } from 'react';
-import { BarChart3, Users, Ticket, AlertTriangle, Settings, FileText, Shield, Code } from 'lucide-react';
+import { BarChart3, Users, Ticket, AlertTriangle, Settings, FileText, Shield, MessageSquare, Ban } from 'lucide-react';
 
 // Get from environment variables (set in Vercel)
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
-const API_SECRET = import.meta.env.VITE_API_SECRET || 'YOUR_API_SECRET_HERE';
+const API_SECRET = import.meta.env.VITE_API_SECRET || 'your-secret-here';
 
-export default function App() {
+function App() {
   const [activeTab, setActiveTab] = useState('overview');
   const [stats, setStats] = useState(null);
   const [tickets, setTickets] = useState([]);
   const [applications, setApplications] = useState([]);
   const [warnings, setWarnings] = useState([]);
-  const [settings, setSettings] = useState(null);
-  const [appQuestions, setAppQuestions] = useState({ staff: [], admin: [], developer: [] });
+  const [bans, setBans] = useState([]);
+  const [staff, setStaff] = useState([]);
+  const [messageLogs, setMessageLogs] = useState([]);
+  const [settings, setSettings] = useState({});
+  const [questions, setQuestions] = useState({ staff: [], admin: [], developer: [] });
   const [loading, setLoading] = useState(true);
 
-  // Fetch data
-  const fetchData = async () => {
+  // Fetch data from API
+  const fetchData = async (endpoint) => {
     try {
-      const headers = { 'Authorization': `Bearer ${API_SECRET}` };
-      
-      const [statsRes, ticketsRes, appsRes, warningsRes, settingsRes, questionsRes] = await Promise.all([
-        fetch(`${API_URL}/stats`, { headers }),
-        fetch(`${API_URL}/tickets`, { headers }),
-        fetch(`${API_URL}/applications`, { headers }),
-        fetch(`${API_URL}/warnings`, { headers }),
-        fetch(`${API_URL}/settings`, { headers }),
-        fetch(`${API_URL}/application-questions`, { headers })
-      ]);
-
-      setStats(await statsRes.json());
-      setTickets(await ticketsRes.json());
-      setApplications(await appsRes.json());
-      setWarnings(await warningsRes.json());
-      setSettings(await settingsRes.json());
-      setAppQuestions(await questionsRes.json());
-      setLoading(false);
+      const response = await fetch(`${API_URL}${endpoint}`, {
+        headers: {
+          'Authorization': `Bearer ${API_SECRET}`
+        }
+      });
+      if (!response.ok) throw new Error('Failed to fetch');
+      return await response.json();
     } catch (error) {
-      console.error('Failed to fetch data:', error);
-      alert('Failed to connect to bot API. Make sure your bot is running!');
+      console.error(`Error fetching ${endpoint}:`, error);
+      return null;
     }
   };
 
+  // Load all data
+  const loadData = async () => {
+    setLoading(true);
+    const [statsData, ticketsData, appsData, warningsData, bansData, staffData, messagesData, settingsData, questionsData] = await Promise.all([
+      fetchData('/stats'),
+      fetchData('/tickets'),
+      fetchData('/applications'),
+      fetchData('/warnings'),
+      fetchData('/bans'),
+      fetchData('/staff'),
+      fetchData('/message-logs'),
+      fetchData('/settings'),
+      fetchData('/application-questions')
+    ]);
+
+    if (statsData) setStats(statsData);
+    if (ticketsData) setTickets(ticketsData);
+    if (appsData) setApplications(appsData);
+    if (warningsData) setWarnings(warningsData);
+    if (bansData) setBans(bansData);
+    if (staffData) setStaff(staffData);
+    if (messagesData) setMessageLogs(messagesData);
+    if (settingsData) setSettings(settingsData);
+    if (questionsData) setQuestions(questionsData);
+    
+    setLoading(false);
+  };
+
   useEffect(() => {
-    fetchData();
-    const interval = setInterval(fetchData, 10000); // Refresh every 10s
+    loadData();
+    // Auto-refresh every 10 seconds
+    const interval = setInterval(loadData, 10000);
     return () => clearInterval(interval);
   }, []);
 
-  // Update settings
-  const updateSettings = async (newSettings) => {
+  // Save settings
+  const saveSettings = async () => {
     try {
       const response = await fetch(`${API_URL}/settings`, {
         method: 'PUT',
@@ -57,18 +78,19 @@ export default function App() {
           'Authorization': `Bearer ${API_SECRET}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify(newSettings)
+        body: JSON.stringify(settings)
       });
-      const data = await response.json();
-      setSettings(data.settings);
-      alert('✅ Settings updated!');
+      if (response.ok) {
+        alert('Settings saved successfully!');
+      }
     } catch (error) {
-      alert('❌ Failed to update settings');
+      console.error('Error saving settings:', error);
+      alert('Failed to save settings');
     }
   };
 
-  // Update application questions
-  const updateQuestions = async (type, questions) => {
+  // Save questions
+  const saveQuestions = async (type) => {
     try {
       const response = await fetch(`${API_URL}/application-questions`, {
         method: 'PUT',
@@ -76,141 +98,164 @@ export default function App() {
           'Authorization': `Bearer ${API_SECRET}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ type, questions })
+        body: JSON.stringify({ type, questions: questions[type] })
+      });
+      if (response.ok) {
+        alert(`${type} questions saved successfully!`);
+      }
+    } catch (error) {
+      console.error('Error saving questions:', error);
+      alert('Failed to save questions');
+    }
+  };
+
+  // Send message to user
+  const sendMessage = async (userId, message) => {
+    try {
+      const response = await fetch(`${API_URL}/send-message`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${API_SECRET}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          from_staff: 'dashboard',
+          to_user: userId,
+          message: message
+        })
       });
       const data = await response.json();
-      setAppQuestions(prev => ({ ...prev, [type]: data.questions }));
-      alert('✅ Questions updated!');
+      if (data.success) {
+        alert('Message sent successfully!');
+      } else {
+        alert('Failed to send message: ' + data.error);
+      }
     } catch (error) {
-      alert('❌ Failed to update questions');
+      console.error('Error sending message:', error);
+      alert('Failed to send message');
+    }
+  };
+
+  // Review application
+  const reviewApplication = async (appId, action) => {
+    try {
+      const response = await fetch(`${API_URL}/applications/${appId}/review`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${API_SECRET}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ action, reviewer_id: 'dashboard' })
+      });
+      if (response.ok) {
+        alert(`Application ${action}d successfully!`);
+        loadData();
+      }
+    } catch (error) {
+      console.error('Error reviewing application:', error);
+      alert('Failed to review application');
     }
   };
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 flex items-center justify-center">
-        <div className="text-white text-2xl">Loading dashboard...</div>
+      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+        <div className="text-white text-2xl">Loading Dashboard...</div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 text-white">
+    <div className="min-h-screen bg-gray-900 text-white">
       {/* Header */}
-      <header className="bg-black bg-opacity-50 backdrop-blur-lg border-b border-purple-500/30 p-6">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
-              Roblox Bot Dashboard
-            </h1>
-            <p className="text-gray-400 mt-1">Manage your Discord server</p>
-          </div>
-          <div className="flex gap-4">
-            <div className="bg-green-500/20 px-4 py-2 rounded-lg border border-green-500/30">
-              <span className="text-green-400">● Bot Online</span>
-            </div>
-          </div>
+      <header className="bg-gray-800 border-b border-gray-700 p-4">
+        <div className="container mx-auto flex items-center justify-between">
+          <h1 className="text-2xl font-bold text-blue-400">🎮 Roblox Bot Dashboard</h1>
+          <div className="text-sm text-gray-400">Last updated: {new Date().toLocaleTimeString()}</div>
         </div>
       </header>
 
-      <div className="max-w-7xl mx-auto p-6">
-        {/* Navigation */}
-        <nav className="flex gap-2 mb-6 overflow-x-auto">
+      <div className="container mx-auto p-6">
+        {/* Navigation Tabs */}
+        <div className="flex space-x-2 mb-6 overflow-x-auto">
           {[
-            { id: 'overview', icon: BarChart3, label: 'Overview' },
-            { id: 'tickets', icon: Ticket, label: 'Tickets' },
-            { id: 'applications', icon: FileText, label: 'Applications' },
-            { id: 'questions', icon: Code, label: 'App Questions' },
-            { id: 'warnings', icon: AlertTriangle, label: 'Warnings' },
-            { id: 'settings', icon: Settings, label: 'Settings' }
-          ].map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 px-6 py-3 rounded-lg font-medium transition-all ${
-                activeTab === tab.id
-                  ? 'bg-purple-600 text-white shadow-lg shadow-purple-500/50'
-                  : 'bg-white/5 text-gray-300 hover:bg-white/10'
-              }`}
-            >
-              <tab.icon size={20} />
-              {tab.label}
-            </button>
-          ))}
-        </nav>
+            { id: 'overview', label: 'Overview', icon: BarChart3 },
+            { id: 'tickets', label: 'Tickets', icon: Ticket },
+            { id: 'applications', label: 'Applications', icon: FileText },
+            { id: 'warnings', label: 'Warnings', icon: AlertTriangle },
+            { id: 'bans', label: 'Bans', icon: Ban },
+            { id: 'staff', label: 'Staff', icon: Shield },
+            { id: 'messages', label: 'Messages', icon: MessageSquare },
+            { id: 'questions', label: 'App Questions', icon: FileText },
+            { id: 'settings', label: 'Settings', icon: Settings }
+          ].map(tab => {
+            const Icon = tab.icon;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition ${
+                  activeTab === tab.id
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                }`}
+              >
+                <Icon size={18} />
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
+        </div>
 
         {/* Overview Tab */}
-        {activeTab === 'overview' && (
+        {activeTab === 'overview' && stats && (
           <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              <StatCard
-                title="Total Members"
-                value={stats.members}
-                icon={Users}
-                color="blue"
-              />
-              <StatCard
-                title="Open Tickets"
-                value={stats.tickets.open}
-                subtitle={`${stats.tickets.total} total`}
-                icon={Ticket}
-                color="green"
-              />
-              <StatCard
-                title="Pending Apps"
-                value={stats.applications.pending}
-                subtitle={`${stats.applications.total} total`}
-                icon={FileText}
-                color="yellow"
-              />
-              <StatCard
-                title="Total Warnings"
-                value={stats.warnings}
-                icon={AlertTriangle}
-                color="red"
-              />
+              <StatCard title="Total Members" value={stats.members} icon={Users} color="blue" />
+              <StatCard title="Open Tickets" value={stats.tickets?.open || 0} icon={Ticket} color="green" />
+              <StatCard title="Pending Applications" value={stats.applications?.pending || 0} icon={FileText} color="yellow" />
+              <StatCard title="Active Bans" value={stats.bans || 0} icon={Ban} color="red" />
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-purple-500/30">
-                <h3 className="text-xl font-bold mb-4">Recent Tickets</h3>
-                <div className="space-y-3">
+              <div className="bg-gray-800 p-6 rounded-lg">
+                <h3 className="text-xl font-bold mb-4 flex items-center">
+                  <Ticket className="mr-2" /> Recent Tickets
+                </h3>
+                <div className="space-y-2">
                   {tickets.slice(0, 5).map(ticket => (
-                    <div key={ticket.id} className="bg-white/5 p-3 rounded-lg">
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <p className="font-medium">{ticket.id}</p>
-                          <p className="text-sm text-gray-400">User ID: {ticket.user_id}</p>
-                        </div>
+                    <div key={ticket.id} className="bg-gray-700 p-3 rounded">
+                      <div className="flex justify-between items-center">
+                        <span className="font-semibold">Ticket #{ticket.id}</span>
                         <span className={`px-2 py-1 rounded text-xs ${
-                          ticket.status === 'open' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
+                          ticket.status === 'open' ? 'bg-green-600' : 'bg-gray-600'
                         }`}>
                           {ticket.status}
                         </span>
                       </div>
+                      <div className="text-sm text-gray-400 mt-1">User: {ticket.user_id}</div>
                     </div>
                   ))}
                 </div>
               </div>
 
-              <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-purple-500/30">
-                <h3 className="text-xl font-bold mb-4">Recent Applications</h3>
-                <div className="space-y-3">
+              <div className="bg-gray-800 p-6 rounded-lg">
+                <h3 className="text-xl font-bold mb-4 flex items-center">
+                  <FileText className="mr-2" /> Recent Applications
+                </h3>
+                <div className="space-y-2">
                   {applications.slice(0, 5).map(app => (
-                    <div key={app.id} className="bg-white/5 p-3 rounded-lg">
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <p className="font-medium capitalize">{app.type} Application</p>
-                          <p className="text-sm text-gray-400">User ID: {app.user_id}</p>
-                        </div>
+                    <div key={app.id} className="bg-gray-700 p-3 rounded">
+                      <div className="flex justify-between items-center">
+                        <span className="font-semibold">{app.type} Application</span>
                         <span className={`px-2 py-1 rounded text-xs ${
-                          app.status === 'pending' ? 'bg-yellow-500/20 text-yellow-400' :
-                          app.status === 'approved' ? 'bg-green-500/20 text-green-400' :
-                          'bg-red-500/20 text-red-400'
+                          app.status === 'pending' ? 'bg-yellow-600' :
+                          app.status === 'approved' ? 'bg-green-600' : 'bg-red-600'
                         }`}>
                           {app.status}
                         </span>
                       </div>
+                      <div className="text-sm text-gray-400 mt-1">User: {app.user_id}</div>
                     </div>
                   ))}
                 </div>
@@ -221,117 +266,300 @@ export default function App() {
 
         {/* Tickets Tab */}
         {activeTab === 'tickets' && (
-          <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-purple-500/30">
-            <h2 className="text-2xl font-bold mb-6">All Tickets</h2>
+          <div className="bg-gray-800 p-6 rounded-lg">
+            <h2 className="text-2xl font-bold mb-4">All Tickets</h2>
             <div className="space-y-3">
               {tickets.map(ticket => (
-                <div key={ticket.id} className="bg-white/5 p-4 rounded-lg">
+                <div key={ticket.id} className="bg-gray-700 p-4 rounded-lg">
                   <div className="flex justify-between items-start">
                     <div>
-                      <p className="font-bold text-lg">{ticket.id}</p>
-                      <p className="text-gray-400">Channel ID: {ticket.channel_id}</p>
-                      <p className="text-gray-400">User ID: {ticket.user_id}</p>
-                      <p className="text-sm text-gray-500">Created: {new Date(ticket.created_at).toLocaleString()}</p>
+                      <div className="font-bold text-lg">Ticket #{ticket.id}</div>
+                      <div className="text-sm text-gray-400">User ID: {ticket.user_id}</div>
+                      <div className="text-sm text-gray-400">Channel ID: {ticket.channel_id}</div>
+                      <div className="text-sm text-gray-400">Created: {new Date(ticket.created_at).toLocaleString()}</div>
                     </div>
-                    <span className={`px-3 py-1 rounded-lg ${
-                      ticket.status === 'open' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
+                    <span className={`px-3 py-1 rounded ${
+                      ticket.status === 'open' ? 'bg-green-600' : 'bg-gray-600'
                     }`}>
-                      {ticket.status.toUpperCase()}
+                      {ticket.status}
                     </span>
                   </div>
                 </div>
               ))}
-              {tickets.length === 0 && (
-                <p className="text-center text-gray-400 py-8">No tickets yet</p>
-              )}
             </div>
           </div>
         )}
 
         {/* Applications Tab */}
         {activeTab === 'applications' && (
-          <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-purple-500/30">
-            <h2 className="text-2xl font-bold mb-6">All Applications</h2>
+          <div className="bg-gray-800 p-6 rounded-lg">
+            <h2 className="text-2xl font-bold mb-4">All Applications</h2>
             <div className="space-y-4">
               {applications.map(app => (
-                <div key={app.id} className="bg-white/5 p-4 rounded-lg">
+                <div key={app.id} className="bg-gray-700 p-4 rounded-lg">
                   <div className="flex justify-between items-start mb-3">
                     <div>
-                      <p className="font-bold text-lg capitalize">{app.type} Application</p>
-                      <p className="text-gray-400">User ID: {app.user_id}</p>
-                      <p className="text-sm text-gray-500">Submitted: {new Date(app.created_at).toLocaleString()}</p>
+                      <div className="font-bold text-lg">{app.type.toUpperCase()} Application</div>
+                      <div className="text-sm text-gray-400">User ID: {app.user_id}</div>
+                      <div className="text-sm text-gray-400">Created: {new Date(app.created_at).toLocaleString()}</div>
                     </div>
-                    <span className={`px-3 py-1 rounded-lg ${
-                      app.status === 'pending' ? 'bg-yellow-500/20 text-yellow-400' :
-                      app.status === 'approved' ? 'bg-green-500/20 text-green-400' :
-                      app.status === 'in_progress' ? 'bg-blue-500/20 text-blue-400' :
-                      'bg-red-500/20 text-red-400'
+                    <span className={`px-3 py-1 rounded ${
+                      app.status === 'pending' ? 'bg-yellow-600' :
+                      app.status === 'approved' ? 'bg-green-600' : 'bg-red-600'
                     }`}>
-                      {app.status.toUpperCase()}
+                      {app.status}
                     </span>
                   </div>
-                  {app.answers && app.answers.length > 0 && (
-                    <div className="space-y-2 mt-3 border-t border-white/10 pt-3">
-                      {app.answers.map((qa, i) => (
-                        <div key={i} className="bg-white/5 p-3 rounded">
-                          <p className="text-sm font-semibold text-purple-400">{qa.question}</p>
-                          <p className="text-gray-300 mt-1">{qa.answer}</p>
-                        </div>
-                      ))}
+                  
+                  <div className="space-y-2 mt-3">
+                    {app.answers && app.answers.map((qa, idx) => (
+                      <div key={idx} className="bg-gray-600 p-3 rounded">
+                        <div className="font-semibold text-sm text-blue-400">{qa.question}</div>
+                        <div className="text-sm mt-1">{qa.answer}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {app.status === 'pending' && (
+                    <div className="flex space-x-2 mt-3">
+                      <button
+                        onClick={() => reviewApplication(app.id, 'approve')}
+                        className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded"
+                      >
+                        Approve
+                      </button>
+                      <button
+                        onClick={() => reviewApplication(app.id, 'deny')}
+                        className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded"
+                      >
+                        Deny
+                      </button>
                     </div>
                   )}
                 </div>
               ))}
-              {applications.length === 0 && (
-                <p className="text-center text-gray-400 py-8">No applications yet</p>
-              )}
             </div>
-          </div>
-        )}
-
-        {/* Application Questions Tab */}
-        {activeTab === 'questions' && (
-          <div className="space-y-6">
-            {['staff', 'admin', 'developer'].map(type => (
-              <QuestionEditor
-                key={type}
-                type={type}
-                questions={appQuestions[type]}
-                onSave={(questions) => updateQuestions(type, questions)}
-              />
-            ))}
           </div>
         )}
 
         {/* Warnings Tab */}
         {activeTab === 'warnings' && (
-          <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-purple-500/30">
-            <h2 className="text-2xl font-bold mb-6">All Warnings</h2>
+          <div className="bg-gray-800 p-6 rounded-lg">
+            <h2 className="text-2xl font-bold mb-4">All Warnings</h2>
             <div className="space-y-3">
               {warnings.map(warn => (
-                <div key={warn.id} className="bg-white/5 p-4 rounded-lg">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <p className="font-bold">User ID: {warn.userId}</p>
-                      <p className="text-gray-400 mt-1">Reason: {warn.reason}</p>
-                      <p className="text-sm text-gray-500">By: {warn.moderator_id}</p>
-                      <p className="text-sm text-gray-500">Date: {new Date(warn.timestamp).toLocaleString()}</p>
-                    </div>
-                  </div>
+                <div key={warn.id} className="bg-gray-700 p-4 rounded-lg">
+                  <div className="font-bold">Warning #{warn.id}</div>
+                  <div className="text-sm text-gray-400">User ID: {warn.user_id}</div>
+                  <div className="text-sm text-gray-400">Moderator ID: {warn.moderator_id}</div>
+                  <div className="text-sm mt-2">Reason: {warn.reason}</div>
+                  <div className="text-xs text-gray-500 mt-1">{new Date(warn.timestamp).toLocaleString()}</div>
                 </div>
               ))}
-              {warnings.length === 0 && (
-                <p className="text-center text-gray-400 py-8">No warnings issued yet</p>
-              )}
             </div>
           </div>
         )}
 
+        {/* Bans Tab */}
+        {activeTab === 'bans' && (
+          <div className="bg-gray-800 p-6 rounded-lg">
+            <h2 className="text-2xl font-bold mb-4">All Bans</h2>
+            <div className="space-y-3">
+              {bans.map(ban => (
+                <div key={ban.id} className="bg-gray-700 p-4 rounded-lg">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <div className="font-bold">Ban #{ban.id}</div>
+                      <div className="text-sm text-gray-400">User ID: {ban.user_id}</div>
+                      <div className="text-sm text-gray-400">Moderator ID: {ban.moderator_id}</div>
+                      <div className="text-sm mt-2">Reason: {ban.reason}</div>
+                      <div className="text-sm text-gray-400">Duration: {ban.duration}</div>
+                      <div className="text-xs text-gray-500 mt-1">{new Date(ban.timestamp).toLocaleString()}</div>
+                    </div>
+                    <span className={`px-3 py-1 rounded ${
+                      ban.active ? 'bg-red-600' : 'bg-gray-600'
+                    }`}>
+                      {ban.active ? 'Active' : 'Inactive'}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Staff Tab */}
+        {activeTab === 'staff' && (
+          <div className="bg-gray-800 p-6 rounded-lg">
+            <h2 className="text-2xl font-bold mb-4">Staff Members</h2>
+            <div className="space-y-3">
+              {staff.map(member => (
+                <div key={member.user_id} className="bg-gray-700 p-4 rounded-lg">
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <div className="font-bold">User ID: {member.user_id}</div>
+                      <div className="text-sm text-gray-400">
+                        Rank: {member.rank_info?.name || member.rank}
+                      </div>
+                      <div className="text-sm text-gray-400">Level: {member.rank_info?.level || 'N/A'}</div>
+                      <div className="text-xs text-gray-500 mt-1">
+                        Promoted: {new Date(member.promoted_at).toLocaleString()}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-sm text-gray-400">Promoted by</div>
+                      <div className="text-sm">{member.promoted_by}</div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Messages Tab */}
+        {activeTab === 'messages' && (
+          <div className="bg-gray-800 p-6 rounded-lg">
+            <h2 className="text-2xl font-bold mb-4">Message User</h2>
+            <div className="mb-6">
+              <input
+                type="text"
+                placeholder="User ID"
+                id="messageUserId"
+                className="w-full bg-gray-700 text-white p-3 rounded mb-3"
+              />
+              <textarea
+                placeholder="Message content..."
+                id="messageContent"
+                className="w-full bg-gray-700 text-white p-3 rounded mb-3 h-32"
+              />
+              <button
+                onClick={() => {
+                  const userId = document.getElementById('messageUserId').value;
+                  const content = document.getElementById('messageContent').value;
+                  if (userId && content) {
+                    sendMessage(userId, content);
+                    document.getElementById('messageUserId').value = '';
+                    document.getElementById('messageContent').value = '';
+                  }
+                }}
+                className="bg-blue-600 hover:bg-blue-700 px-6 py-2 rounded"
+              >
+                Send Message
+              </button>
+            </div>
+
+            <h3 className="text-xl font-bold mb-3">Recent Messages</h3>
+            <div className="space-y-3">
+              {messageLogs.slice(0, 20).map(log => (
+                <div key={log.id} className="bg-gray-700 p-3 rounded">
+                  <div className="text-sm text-gray-400">User: {log.user_id}</div>
+                  <div className="text-sm text-gray-400">Channel: {log.channel_id}</div>
+                  <div className="mt-2">{log.content}</div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    {new Date(log.timestamp).toLocaleString()}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Questions Tab */}
+        {activeTab === 'questions' && (
+          <div className="space-y-6">
+            {['staff', 'admin', 'developer'].map(type => (
+              <div key={type} className="bg-gray-800 p-6 rounded-lg">
+                <h3 className="text-xl font-bold mb-4 capitalize">{type} Application Questions</h3>
+                <div className="space-y-3">
+                  {questions[type].map((q, idx) => (
+                    <div key={idx} className="flex items-center space-x-2">
+                      <input
+                        type="text"
+                        value={q}
+                        onChange={(e) => {
+                          const newQuestions = { ...questions };
+                          newQuestions[type][idx] = e.target.value;
+                          setQuestions(newQuestions);
+                        }}
+                        className="flex-1 bg-gray-700 text-white p-2 rounded"
+                      />
+                      <button
+                        onClick={() => {
+                          const newQuestions = { ...questions };
+                          newQuestions[type].splice(idx, 1);
+                          setQuestions(newQuestions);
+                        }}
+                        className="bg-red-600 hover:bg-red-700 px-3 py-2 rounded"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    onClick={() => {
+                      const newQuestions = { ...questions };
+                      newQuestions[type].push('');
+                      setQuestions(newQuestions);
+                    }}
+                    className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded"
+                  >
+                    Add Question
+                  </button>
+                  <button
+                    onClick={() => saveQuestions(type)}
+                    className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded ml-2"
+                  >
+                    Save {type} Questions
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Settings Tab */}
-        {activeTab === 'settings' && settings && (
-          <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-purple-500/30">
-            <h2 className="text-2xl font-bold mb-6">Bot Settings</h2>
-            <SettingsForm settings={settings} onSave={updateSettings} />
+        {activeTab === 'settings' && (
+          <div className="bg-gray-800 p-6 rounded-lg">
+            <h2 className="text-2xl font-bold mb-4">Bot Settings</h2>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-semibold mb-2">Ticket Category ID</label>
+                <input
+                  type="text"
+                  value={settings.ticket_category_id || ''}
+                  onChange={(e) => setSettings({ ...settings, ticket_category_id: e.target.value })}
+                  className="w-full bg-gray-700 text-white p-3 rounded"
+                  placeholder="Category ID for tickets"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold mb-2">Staff Role ID</label>
+                <input
+                  type="text"
+                  value={settings.staff_role_id || ''}
+                  onChange={(e) => setSettings({ ...settings, staff_role_id: e.target.value })}
+                  className="w-full bg-gray-700 text-white p-3 rounded"
+                  placeholder="Role ID for staff"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold mb-2">Verified Role ID</label>
+                <input
+                  type="text"
+                  value={settings.verified_role_id || ''}
+                  onChange={(e) => setSettings({ ...settings, verified_role_id: e.target.value })}
+                  className="w-full bg-gray-700 text-white p-3 rounded"
+                  placeholder="Role ID for verified users"
+                />
+              </div>
+              <button
+                onClick={saveSettings}
+                className="bg-blue-600 hover:bg-blue-700 px-6 py-3 rounded font-semibold"
+              >
+                Save Settings
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -339,188 +567,23 @@ export default function App() {
   );
 }
 
-function StatCard({ title, value, subtitle, icon: Icon, color }) {
-  const colors = {
-    blue: 'from-blue-500 to-blue-600',
-    green: 'from-green-500 to-green-600',
-    yellow: 'from-yellow-500 to-yellow-600',
-    red: 'from-red-500 to-red-600'
+function StatCard({ title, value, icon: Icon, color }) {
+  const colorClasses = {
+    blue: 'bg-blue-600',
+    green: 'bg-green-600',
+    yellow: 'bg-yellow-600',
+    red: 'bg-red-600'
   };
 
   return (
-    <div className={`bg-gradient-to-br ${colors[color]} rounded-xl p-6 shadow-lg`}>
-      <div className="flex items-center justify-between mb-3">
-        <Icon size={32} className="opacity-80" />
-        <div className="text-right">
-          <p className="text-3xl font-bold">{value}</p>
-          {subtitle && <p className="text-sm opacity-80">{subtitle}</p>}
-        </div>
+    <div className={`${colorClasses[color]} p-6 rounded-lg`}>
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-lg font-semibold">{title}</h3>
+        <Icon size={24} />
       </div>
-      <p className="font-medium">{title}</p>
+      <div className="text-3xl font-bold">{value}</div>
     </div>
   );
 }
 
-function QuestionEditor({ type, questions, onSave }) {
-  const [editedQuestions, setEditedQuestions] = useState(questions);
-
-  const addQuestion = () => {
-    setEditedQuestions([...editedQuestions, '']);
-  };
-
-  const updateQuestion = (index, value) => {
-    const updated = [...editedQuestions];
-    updated[index] = value;
-    setEditedQuestions(updated);
-  };
-
-  const removeQuestion = (index) => {
-    setEditedQuestions(editedQuestions.filter((_, i) => i !== index));
-  };
-
-  return (
-    <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-purple-500/30">
-      <h3 className="text-xl font-bold mb-4 capitalize">{type} Application Questions</h3>
-      <div className="space-y-3 mb-4">
-        {editedQuestions.map((q, i) => (
-          <div key={i} className="flex gap-2">
-            <input
-              type="text"
-              value={q}
-              onChange={(e) => updateQuestion(i, e.target.value)}
-              placeholder={`Question ${i + 1}`}
-              className="flex-1 bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white placeholder-gray-400 focus:outline-none focus:border-purple-500"
-            />
-            <button
-              onClick={() => removeQuestion(i)}
-              className="bg-red-500/20 hover:bg-red-500/30 text-red-400 px-4 py-2 rounded-lg transition-colors"
-            >
-              Remove
-            </button>
-          </div>
-        ))}
-      </div>
-      <div className="flex gap-2">
-        <button
-          onClick={addQuestion}
-          className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-2 rounded-lg transition-colors"
-        >
-          Add Question
-        </button>
-        <button
-          onClick={() => onSave(editedQuestions)}
-          className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg transition-colors"
-        >
-          Save Questions
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function SettingsForm({ settings, onSave }) {
-  const [edited, setEdited] = useState(settings);
-
-  const handleChange = (key, value) => {
-    setEdited({ ...edited, [key]: value });
-  };
-
-  return (
-    <div className="space-y-4">
-      <div>
-        <label className="block text-sm font-medium mb-2">Ticket Category ID</label>
-        <input
-          type="text"
-          value={edited.ticket_category_id || ''}
-          onChange={(e) => handleChange('ticket_category_id', e.target.value)}
-          placeholder="Category ID for tickets"
-          className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white placeholder-gray-400 focus:outline-none focus:border-purple-500"
-        />
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium mb-2">Staff Role ID</label>
-        <input
-          type="text"
-          value={edited.staff_role_id || ''}
-          onChange={(e) => handleChange('staff_role_id', e.target.value)}
-          placeholder="Role ID for staff members"
-          className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white placeholder-gray-400 focus:outline-none focus:border-purple-500"
-        />
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium mb-2">Admin Role ID</label>
-        <input
-          type="text"
-          value={edited.admin_role_id || ''}
-          onChange={(e) => handleChange('admin_role_id', e.target.value)}
-          placeholder="Role ID for administrators"
-          className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white placeholder-gray-400 focus:outline-none focus:border-purple-500"
-        />
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium mb-2">Verified Role ID</label>
-        <input
-          type="text"
-          value={edited.verified_role_id || ''}
-          onChange={(e) => handleChange('verified_role_id', e.target.value)}
-          placeholder="Role ID for verified users"
-          className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white placeholder-gray-400 focus:outline-none focus:border-purple-500"
-        />
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium mb-2">Log Channel ID</label>
-        <input
-          type="text"
-          value={edited.log_channel_id || ''}
-          onChange={(e) => handleChange('log_channel_id', e.target.value)}
-          placeholder="Channel ID for logs"
-          className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white placeholder-gray-400 focus:outline-none focus:border-purple-500"
-        />
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium mb-2">Application Channel ID</label>
-        <input
-          type="text"
-          value={edited.application_channel_id || ''}
-          onChange={(e) => handleChange('application_channel_id', e.target.value)}
-          placeholder="Channel ID for application reviews"
-          className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white placeholder-gray-400 focus:outline-none focus:border-purple-500"
-        />
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium mb-2">Welcome Message</label>
-        <textarea
-          value={edited.welcome_message || ''}
-          onChange={(e) => handleChange('welcome_message', e.target.value)}
-          placeholder="Welcome message for new members"
-          rows={3}
-          className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white placeholder-gray-400 focus:outline-none focus:border-purple-500"
-        />
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium mb-2">Welcome Channel ID</label>
-        <input
-          type="text"
-          value={edited.welcome_channel_id || ''}
-          onChange={(e) => handleChange('welcome_channel_id', e.target.value)}
-          placeholder="Channel ID for welcome messages"
-          className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white placeholder-gray-400 focus:outline-none focus:border-purple-500"
-        />
-      </div>
-
-      <button
-        onClick={() => onSave(edited)}
-        className="w-full bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg font-medium transition-colors"
-      >
-        Save All Settings
-      </button>
-    </div>
-  );
-}
+export default App;
